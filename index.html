@@ -176,7 +176,7 @@
         </div>
     </div>
 
-    <!-- Admin Login Modal -->
+        <!-- Admin Login Modal -->
     <div class="modal-overlay" id="adminModal">
         <div class="modal-box">
             <div class="modal-header">
@@ -184,6 +184,9 @@
                 <button class="btn-close" onclick="toggleAdminModal()">&times;</button>
             </div>
             <form onsubmit="handleAdminLogin(event)" class="modal-form">
+                <!-- Pesan Error Halus Tanpa Leak Data -->
+                <p id="adminErrorMsg" style="color: #ef4444; font-size: 0.82rem; display: none; background: rgba(239, 68, 68, 0.1); padding: 8px 12px; border-radius: 6px; border: 1px solid rgba(239, 68, 68, 0.2);"></p>
+                
                 <div class="form-group">
                     <label>Username</label>
                     <input type="text" id="adminUsername" class="input-control" placeholder="Masukkan Username" required>
@@ -196,6 +199,7 @@
             </form>
         </div>
     </div>
+
 
     <!-- Edit/Add Product Modal -->
     <div class="modal-overlay" id="productModal">
