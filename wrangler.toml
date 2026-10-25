@@ -1,5 +1,9 @@
 name = "diastraa-studio"
-pages_build_output_dir = "."
+compatibility_date = "2026-10-19"
+main = "_worker.js"
+
+[assets]
+directory = "."
 
 [[d1_databases]]
 binding = "DB"
