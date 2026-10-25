@@ -1,442 +1,353 @@
-// --- Initial State & Config ---
-const PHONE_NUMBER = '6282253507804';
-const ITEMS_PER_PAGE = 6;
-let currentPage = 1;
-let searchQuery = '';
-let selectedRatingScore = 5;
-let isAdminLoggedIn = false;
+// Diastraa Studio - Frontend Application Script (app.js)
+// Connected with Cloudflare Pages Functions API (/api/products & /api/reviews)
 
+const WA_NUMBER = "6282253507804";
 let products = [];
-let cart = JSON.parse(localStorage.getItem('diastraa_cart')) || [];
 let reviews = [];
+let cart = [];
+let isAdmin = false;
 
-// --- App Initialization ---
-document.addEventListener('DOMContentLoaded', async () => {
-    await fetchProductsFromDB();
-    await fetchReviewsFromDB();
-    renderCart();
+// --- Initialize App ---
+document.addEventListener('DOMContentLoaded', () => {
+    initApp();
 });
 
-// --- API Fetching (Cloudflare D1 Database) ---
-async function fetchProductsFromDB() {
+async function initApp() {
+    checkAdminSession();
+    await loadProducts();
+    await loadReviews();
+    setupEventListeners();
+}
+
+// --- Admin Session Check ---
+function checkAdminSession() {
+    isAdmin = sessionStorage.getItem('diastraa_admin') === 'true';
+    updateAdminUI();
+}
+
+function updateAdminUI() {
+    const adminBtn = document.getElementById('admin-login-btn') || document.querySelector('button:has-text("Login"), button:has-text("Logout")');
+    const addProductBtn = document.getElementById('add-product-btn');
+    
+    if (adminBtn) {
+        adminBtn.innerText = isAdmin ? 'Logout Admin' : 'Login Penjual';
+        adminBtn.onclick = isAdmin ? logoutAdmin : showLoginModal;
+    }
+    
+    if (addProductBtn) {
+        addProductBtn.style.display = isAdmin ? 'inline-flex' : 'none';
+    }
+    
+    renderProducts(products);
+}
+
+function showLoginModal() {
+    const user = prompt("Masukkan Username Admin:");
+    const pass = prompt("Masukkan Password Admin:");
+    if (user === "User" && pass === "user123") {
+        sessionStorage.setItem('diastraa_admin', 'true');
+        isAdmin = true;
+        alert("Login Admin Berhasil!");
+        updateAdminUI();
+    } else if (user !== null || pass !== null) {
+        alert("Username atau Password salah!");
+    }
+}
+
+function logoutAdmin() {
+    sessionStorage.removeItem('diastraa_admin');
+    isAdmin = false;
+    alert("Logout Berhasil!");
+    updateAdminUI();
+}
+
+// --- Data Fetching dari D1 Database ---
+async function loadProducts() {
     try {
         const res = await fetch('/api/products');
-        if (res.ok) {
-            products = await res.json();
-        } else {
-            console.warn('DB belum terhubung, menggunakan data fallback');
-        }
+        if (!res.ok) throw new Error(`HTTP Error Status: ${res.status}`);
+        products = await res.json();
+        renderProducts(products);
     } catch (err) {
-        console.error('Fetch error:', err);
+        console.error("Gagal mengambil data produk dari D1 Database:", err);
+        const container = document.getElementById('product-list') || document.querySelector('.grid');
+        if (container) {
+            container.innerHTML = `
+                <div class="col-span-full text-center py-8 text-red-400 bg-gray-800/50 rounded-lg border border-red-500/30">
+                    <p class="font-semibold">Gagal memuat produk dari D1 Database</p>
+                    <p class="text-xs text-gray-400 mt-1">${err.message}</p>
+                </div>
+            `;
+        }
     }
-    renderProducts();
 }
 
-async function fetchReviewsFromDB() {
+async function loadReviews() {
     try {
         const res = await fetch('/api/reviews');
-        if (res.ok) {
-            reviews = await res.json();
-        }
+        if (!res.ok) throw new Error(`HTTP Error Status: ${res.status}`);
+        reviews = await res.json();
+        renderReviews(reviews);
     } catch (err) {
-        console.error('Fetch error:', err);
+        console.error("Gagal mengambil data ulasan dari D1 Database:", err);
     }
-    renderReviews();
 }
 
-// Helper Image Placeholder
-function getImageUrl(img) {
-    if(!img) return 'https://images.unsplash.com/photo-1507238691740-187a5b1d37b8?auto=format&fit=crop&w=600&q=80';
-    return `${img}.jpg`;
-}
+// --- Render Products ---
+function renderProducts(items) {
+    const container = document.getElementById('product-list') || document.querySelector('.grid');
+    const countEl = document.getElementById('product-count');
+    
+    if (countEl) {
+        countEl.innerText = `Menampilkan ${items.length} dari ${items.length} template`;
+    }
+    
+    if (!container) return;
 
-function handleImgError(el) {
-    el.onerror = null;
-    el.src = 'https://images.unsplash.com/photo-1507238691740-187a5b1d37b8?auto=format&fit=crop&w=600&q=80';
-}
+    if (!items || items.length === 0) {
+        container.innerHTML = `
+            <div class="col-span-full text-center py-12">
+                <p class="text-gray-400 text-lg">Tidak ada template yang ditemukan</p>
+                ${isAdmin ? `<button onclick="showAddProductModal()" class="mt-4 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg font-medium">+ Tambah Template Pertama</button>` : ''}
+            </div>
+        `;
+        return;
+    }
 
-// Format Currency
-function formatRupiah(amount) {
-    return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(amount);
-}
-
-// Render Products & Pagination
-function renderProducts() {
-    const grid = document.getElementById('productGrid');
-    const filtered = products.filter(p => 
-        p.title.toLowerCase().includes(searchQuery.toLowerCase()) || 
-        p.category.toLowerCase().includes(searchQuery.toLowerCase())
-    );
-
-    const totalPages = Math.ceil(filtered.length / ITEMS_PER_PAGE) || 1;
-    if (currentPage > totalPages) currentPage = totalPages;
-
-    const startIdx = (currentPage - 1) * ITEMS_PER_PAGE;
-    const paginatedProducts = filtered.slice(startIdx, startIdx + ITEMS_PER_PAGE);
-
-    document.getElementById('productCountInfo').innerText = `Menampilkan ${paginatedProducts.length} dari ${filtered.length} template`;
-
-    if (paginatedProducts.length === 0) {
-        grid.innerHTML = `<div style="grid-column: 1/-1; text-align: center; padding: 48px; color: #94a3b8;">
-            <p style="font-size: 1.1rem; font-weight: 600;">Tidak ada template yang ditemukan</p>
-        </div>`;
-    } else {
-        grid.innerHTML = paginatedProducts.map(p => `
-            <div class="product-card">
-                <div class="card-img-wrap">
-                    <span class="category-tag">${p.category}</span>
-                    <img src="${getImageUrl(p.img)}" alt="${p.title}" class="card-img" onerror="handleImgError(this)">
+    container.innerHTML = items.map(p => `
+        <div class="bg-gray-800 rounded-xl overflow-hidden border border-gray-700 flex flex-col justify-between shadow-lg hover:border-indigo-500 transition duration-300">
+            <div>
+                <div class="relative">
+                    <img src="https://picsum.photos/seed/${p.img}/400/250" alt="${p.title}" class="w-full h-48 object-cover">
+                    <span class="absolute top-3 right-3 text-xs font-semibold bg-indigo-600 text-white px-2.5 py-1 rounded-full shadow">
+                        ${p.category}
+                    </span>
                 </div>
-                <div class="card-body">
-                    <h3 class="card-title">${p.title}</h3>
-                    <p class="card-desc">${p.desc}</p>
-                    <div class="card-footer">
-                        <div class="price-box">
-                            <span class="price-label">Harga Template</span>
-                            <span class="price-value">${formatRupiah(p.price)}</span>
-                        </div>
-                        <button class="btn btn-primary" onclick="addToCart(${p.id})">+ Keranjang</button>
-                    </div>
-                    ${isAdminLoggedIn ? `
-                        <div class="admin-actions">
-                            <button class="btn btn-outline btn-block" style="font-size:0.75rem;" onclick="openEditProductModal(${p.id})">✏️ Edit</button>
-                            <button class="btn btn-danger btn-block" style="font-size:0.75rem;" onclick="deleteProduct(${p.id})">🗑️ Hapus</button>
-                        </div>
-                    ` : ''}
+                <div class="p-5">
+                    <h3 class="font-bold text-xl text-white mb-2">${p.title}</h3>
+                    <p class="text-gray-400 text-sm line-clamp-3 mb-4">${p.desc}</p>
                 </div>
             </div>
-        `).join('');
-    }
-
-    renderPagination(totalPages);
-}
-
-function renderPagination(totalPages) {
-    const container = document.getElementById('paginationContainer');
-    if (totalPages <= 1) {
-        container.innerHTML = '';
-        return;
-    }
-
-    let html = '';
-    for (let i = 1; i <= totalPages; i++) {
-        html += `<button class="page-btn ${i === currentPage ? 'active' : ''}" onclick="goToPage(${i})">${i}</button>`;
-    }
-    container.innerHTML = html;
-}
-
-function goToPage(page) {
-    currentPage = page;
-    renderProducts();
-    window.scrollTo({ top: 400, behavior: 'smooth' });
-}
-
-function handleSearch() {
-    searchQuery = document.getElementById('searchInput').value;
-    currentPage = 1;
-    renderProducts();
-}
-
-// Cart Logic
-function addToCart(productId) {
-    const prod = products.find(p => p.id === productId);
-    if (!prod) return;
-
-    const existing = cart.find(item => item.id === productId);
-    if (existing) {
-        existing.qty += 1;
-    } else {
-        cart.push({ ...prod, qty: 1 });
-    }
-
-    saveCart();
-    renderCart();
-    toggleCart(true);
-}
-
-function updateQty(productId, delta) {
-    const item = cart.find(i => i.id === productId);
-    if (!item) return;
-
-    item.qty += delta;
-    if (item.qty <= 0) {
-        cart = cart.filter(i => i.id !== productId);
-    }
-    saveCart();
-    renderCart();
-}
-
-function saveCart() {
-    localStorage.setItem('diastraa_cart', JSON.stringify(cart));
-}
-
-function renderCart() {
-    const list = document.getElementById('cartItemsList');
-    const badge = document.getElementById('cartBadge');
-    const totalEl = document.getElementById('cartTotalPrice');
-
-    const totalQty = cart.reduce((sum, item) => sum + item.qty, 0);
-    const totalPrice = cart.reduce((sum, item) => sum + (item.price * item.qty), 0);
-
-    badge.innerText = totalQty;
-    totalEl.innerText = formatRupiah(totalPrice);
-
-    if (cart.length === 0) {
-        list.innerHTML = `<div style="text-align: center; color: #94a3b8; margin: auto 0;">
-            <p>Keranjang belanja masih kosong.</p>
-        </div>`;
-        return;
-    }
-
-    list.innerHTML = cart.map(item => `
-        <div class="cart-item">
-            <img src="${getImageUrl(item.img)}" class="cart-img" onerror="handleImgError(this)">
-            <div class="cart-info">
-                <div class="cart-item-title">${item.title}</div>
-                <div class="cart-item-price">${formatRupiah(item.price)}</div>
-                <div class="qty-controls">
-                    <button class="btn-qty" onclick="updateQty(${item.id}, -1)">-</button>
-                    <span style="font-size:0.85rem; font-weight:700; min-width: 18px; text-align:center;">${item.qty}</span>
-                    <button class="btn-qty" onclick="updateQty(${item.id}, 1)">+</button>
+            
+            <div class="p-5 pt-0 border-t border-gray-700/50 mt-auto">
+                <div class="flex items-center justify-between mt-4">
+                    <div>
+                        <span class="text-xs text-gray-400 block">Harga</span>
+                        <span class="font-bold text-emerald-400 text-xl">Rp ${Number(p.price).toLocaleString('id-ID')}</span>
+                    </div>
+                    <button onclick="addToCart(${p.id})" class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm font-semibold transition">
+                        + Keranjang
+                    </button>
                 </div>
+                ${isAdmin ? `
+                    <div class="flex gap-2 mt-3 pt-3 border-t border-gray-700">
+                        <button onclick="editProduct(${p.id})" class="flex-1 bg-yellow-600 hover:bg-yellow-700 text-white py-1 rounded text-xs font-medium">Edit</button>
+                        <button onclick="deleteProduct(${p.id})" class="flex-1 bg-red-600 hover:bg-red-700 text-white py-1 rounded text-xs font-medium">Hapus</button>
+                    </div>
+                ` : ''}
             </div>
         </div>
     `).join('');
 }
 
-function toggleCart(forceOpen = false) {
-    const modal = document.getElementById('cartModal');
-    if (forceOpen) {
-        modal.classList.add('active');
+// --- Render Reviews ---
+function renderReviews(items) {
+    const container = document.getElementById('review-list');
+    const avgEl = document.getElementById('avg-rating');
+    const totalEl = document.getElementById('total-reviews');
+    
+    if (items && items.length > 0) {
+        const avg = (items.reduce((acc, r) => acc + Number(r.rating), 0) / items.length).toFixed(1);
+        if (avgEl) avgEl.innerText = avg;
+        if (totalEl) totalEl.innerText = `${items.length} Ulasan Pembeli`;
     } else {
-        modal.classList.toggle('active');
+        if (avgEl) avgEl.innerText = "0.0";
+        if (totalEl) totalEl.innerText = "0 Ulasan Pembeli";
+    }
+
+    if (!container) return;
+
+    if (!items || items.length === 0) {
+        container.innerHTML = `<p class="text-gray-400 text-center py-4">Belum ada ulasan. Berikan ulasan pertama Anda!</p>`;
+        return;
+    }
+
+    container.innerHTML = items.map(r => `
+        <div class="bg-gray-800 p-4 rounded-xl border border-gray-700 mb-3 shadow">
+            <div class="flex justify-between items-center mb-2">
+                <span class="font-bold text-white text-base">${r.name}</span>
+                <div class="flex items-center text-yellow-400 text-sm font-semibold">
+                    ${'★'.repeat(r.rating)}${'☆'.repeat(5 - r.rating)}
+                    <span class="ml-1 text-xs text-gray-300">(${r.rating}.0)</span>
+                </div>
+            </div>
+            <p class="text-gray-300 text-sm leading-relaxed">${r.comment}</p>
+            <span class="text-xs text-gray-500 mt-2 block">${r.date}</span>
+        </div>
+    `).join('');
+}
+
+// --- Cart & WA Checkout ---
+function addToCart(id) {
+    const item = products.find(p => p.id === id);
+    if (!item) return;
+    cart.push(item);
+    updateCartUI();
+    alert(`"${item.title}" berhasil ditambahkan ke keranjang!`);
+}
+
+function updateCartUI() {
+    const badge = document.getElementById('cart-badge') || document.querySelector('.bg-indigo-600.rounded-full');
+    if (badge) {
+        badge.innerText = cart.length;
     }
 }
 
 function checkoutWA() {
     if (cart.length === 0) {
-        alert('Keranjang belanja Anda masih kosong!');
+        alert("Keranjang belanja Anda masih kosong!");
         return;
     }
-
-    let message = "Halo Diastraa Studio, saya ingin membeli template website berikut:\n\n";
+    
+    let msg = `Halo Diastraa Studio, saya ingin memesan produk berikut:\n\n`;
     let total = 0;
-
-    cart.forEach((item, idx) => {
-        const subtotal = item.price * item.qty;
-        total += subtotal;
-        message += `${idx + 1}. *${item.title}*\n   - Jumlah: ${item.qty} x ${formatRupiah(item.price)}\n   - Subtotal: ${formatRupiah(subtotal)}\n\n`;
+    cart.forEach((item, index) => {
+        msg += `${index + 1}. *${item.title}* (${item.category})\n   Harga: Rp ${Number(item.price).toLocaleString('id-ID')}\n`;
+        total += Number(item.price);
     });
-
-    message += `*TOTAL PEMBAYARAN: ${formatRupiah(total)}*\n\n`;
-    message += "Mohon petunjuk untuk proses pembayaran dan pengiriman source code. Terima kasih!";
-
-    const encoded = encodeURIComponent(message);
-    window.open(`https://wa.me/${PHONE_NUMBER}?text=${encoded}`, '_blank');
+    
+    msg += `\n------------------------------\n`;
+    msg += `*Total Pembayaran: Rp ${total.toLocaleString('id-ID')}*\n\n`;
+    msg += `Mohon instruksi pembayaran & penyerahan source code. Terima kasih!`;
+    
+    window.open(`https://wa.me/${WA_NUMBER}?text=${encodeURIComponent(msg)}`, '_blank');
 }
 
-// Admin Dashboard Logic
-function toggleAdminModal() {
-    if (isAdminLoggedIn) {
-        isAdminLoggedIn = false;
-        document.getElementById('adminBtnText').innerText = 'Login Penjual';
-        document.getElementById('addProductAdminArea').style.display = 'none';
-        renderProducts();
-        alert('Anda telah logout dari mode penjual.');
+// --- Admin CRUD Operations ---
+async function showAddProductModal() {
+    if (!isAdmin) return;
+    const title = prompt("Judul Template:");
+    if (!title) return;
+    const category = prompt("Kategori (misal: SaaS & App, E-Commerce, Portfolio):", "SaaS & App");
+    const price = parseInt(prompt("Harga (Rp):", "150000"));
+    const desc = prompt("Deskripsi Singkat:");
+    const img = prompt("ID Gambar (1-10):", "1");
+
+    if (!title || isNaN(price) || !desc) {
+        alert("Data produk tidak lengkap!");
         return;
     }
-    document.getElementById('adminModal').classList.toggle('active');
-}
-
-function handleAdminLogin(e) {
-    e.preventDefault();
-    const u = document.getElementById('adminUsername').value;
-    const p = document.getElementById('adminPassword').value;
-
-    if (u === 'User' && p === 'user123') {
-        isAdminLoggedIn = true;
-        document.getElementById('adminBtnText').innerText = 'Logout Admin';
-        document.getElementById('addProductAdminArea').style.display = 'block';
-        document.getElementById('adminModal').classList.remove('active');
-        renderProducts();
-        alert('Berhasil login sebagai Penjual/Admin!');
-    } else {
-        alert('Username atau Password yang Anda masukkan salah!');
-    }
-}
-
-function openAddProductModal() {
-    document.getElementById('productModalTitle').innerText = 'Tambah Template Baru';
-    document.getElementById('editProductId').value = '';
-    document.getElementById('prodTitle').value = '';
-    document.getElementById('prodImg').value = '';
-    document.getElementById('prodPrice').value = '';
-    document.getElementById('prodDesc').value = '';
-    document.getElementById('productModal').classList.add('active');
-}
-
-function openEditProductModal(id) {
-    const prod = products.find(p => p.id === id);
-    if (!prod) return;
-
-    document.getElementById('productModalTitle').innerText = 'Edit Template';
-    document.getElementById('editProductId').value = prod.id;
-    document.getElementById('prodTitle').value = prod.title;
-    document.getElementById('prodImg').value = prod.img;
-    document.getElementById('prodPrice').value = prod.price;
-    document.getElementById('prodCategory').value = prod.category;
-    document.getElementById('prodDesc').value = prod.desc;
-    document.getElementById('productModal').classList.add('active');
-}
-
-function closeProductModal() {
-    document.getElementById('productModal').classList.remove('active');
-}
-
-async function handleSaveProduct(e) {
-    e.preventDefault();
-    const editId = document.getElementById('editProductId').value;
-    const title = document.getElementById('prodTitle').value;
-    const img = document.getElementById('prodImg').value;
-    const price = parseInt(document.getElementById('prodPrice').value);
-    const category = document.getElementById('prodCategory').value;
-    const desc = document.getElementById('prodDesc').value;
-
-    const payload = { title, img, price, category, desc };
 
     try {
-        if (editId) {
-            payload.id = parseInt(editId);
-            await fetch('/api/products', {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
-            });
+        const res = await fetch('/api/products', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ title, img: img || "1", price, category: category || "General", desc })
+        });
+        if (res.ok) {
+            alert("Produk berhasil ditambahkan ke D1 Database!");
+            await loadProducts();
         } else {
-            await fetch('/api/products', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
-            });
+            alert("Gagal menambahkan produk.");
         }
-        await fetchProductsFromDB();
-        closeProductModal();
     } catch (err) {
-        alert('Gagal menyimpan data ke Cloudflare D1!');
+        alert("Error: " + err.message);
     }
 }
 
 async function deleteProduct(id) {
-    if (confirm('Yakin ingin menghapus template ini dari katalog?')) {
-        try {
-            await fetch(`/api/products?id=${id}`, { method: 'DELETE' });
-            await fetchProductsFromDB();
-        } catch (err) {
-            alert('Gagal menghapus produk!');
+    if (!isAdmin) return;
+    if (!confirm("Yakin ingin menghapus produk ini dari database D1?")) return;
+
+    try {
+        const res = await fetch(`/api/products?id=${id}`, { method: 'DELETE' });
+        if (res.ok) {
+            alert("Produk berhasil dihapus!");
+            await loadProducts();
+        } else {
+            alert("Gagal menghapus produk.");
         }
+    } catch (err) {
+        alert("Error: " + err.message);
     }
 }
 
-// Reviews & Ratings Logic
-function renderReviews() {
-    const list = document.getElementById('reviewsList');
-    const totalCountEl = document.getElementById('totalReviewsCount');
-    const avgScoreEl = document.getElementById('avgRatingScore');
-    const avgStarsRow = document.getElementById('avgStarsRow');
+async function editProduct(id) {
+    if (!isAdmin) return;
+    const p = products.find(item => item.id === id);
+    if (!p) return;
 
-    const total = reviews.length;
-    totalCountEl.innerText = `${total} Ulasan Pembeli`;
+    const title = prompt("Edit Judul:", p.title);
+    if (!title) return;
+    const category = prompt("Edit Kategori:", p.category);
+    const price = parseInt(prompt("Edit Harga (Rp):", p.price));
+    const desc = prompt("Edit Deskripsi:", p.desc);
+    const img = prompt("Edit ID Gambar:", p.img);
 
-    if (total === 0) {
-        avgScoreEl.innerText = '0.0';
-        avgStarsRow.innerHTML = '★ ★ ★ ★ ★';
-        list.innerHTML = `<div style="text-align: center; color: #94a3b8; padding: 24px;">Belum ada ulasan pembeli. Jadilah yang pertama memberikan ulasan!</div>`;
-
-        for (let i = 1; i <= 5; i++) {
-            document.getElementById(`count${i}`).innerText = '0';
-            document.getElementById(`bar${i}`).style.width = '0%';
+    try {
+        const res = await fetch('/api/products', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id, title, img, price, category, desc })
+        });
+        if (res.ok) {
+            alert("Produk berhasil diperbarui!");
+            await loadProducts();
+        } else {
+            alert("Gagal memperbarui produk.");
         }
+    } catch (err) {
+        alert("Error: " + err.message);
+    }
+}
+
+// --- Submit Review ---
+async function submitReview() {
+    const name = prompt("Nama Anda:");
+    if (!name) return;
+    const rating = parseInt(prompt("Rating Bintang (1 - 5):", "5"));
+    const comment = prompt("Komentar Ulasan:");
+    if (!comment || isNaN(rating) || rating < 1 || rating > 5) {
+        alert("Ulasan tidak valid!");
         return;
     }
 
-    const sum = reviews.reduce((acc, r) => acc + r.rating, 0);
-    const avg = (sum / total).toFixed(1);
-    avgScoreEl.innerText = avg;
-
-    const filledStars = Math.round(avg);
-    let starsHtml = '';
-    for (let i = 1; i <= 5; i++) {
-        starsHtml += i <= filledStars ? '★ ' : '☆ ';
-    }
-    avgStarsRow.innerHTML = starsHtml;
-
-    const counts = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
-    reviews.forEach(r => counts[r.rating] = (counts[r.rating] || 0) + 1);
-
-    for (let i = 1; i <= 5; i++) {
-        const cnt = counts[i];
-        const pct = ((cnt / total) * 100).toFixed(0);
-        document.getElementById(`count${i}`).innerText = cnt;
-        document.getElementById(`bar${i}`).style.width = `${pct}%`;
-    }
-
-    list.innerHTML = reviews.map(r => `
-        <div class="review-item">
-            <div class="review-head">
-                <span class="reviewer-name">${r.name}</span>
-                <span class="review-stars">${'★'.repeat(r.rating)}${'☆'.repeat(5 - r.rating)}</span>
-            </div>
-            <p class="review-text">${r.comment}</p>
-            <div class="review-date">${r.date}</div>
-        </div>
-    `).join('');
-}
-
-function openReviewModal() {
-    setRating(5);
-    document.getElementById('revName').value = '';
-    document.getElementById('revComment').value = '';
-    document.getElementById('reviewModal').classList.add('active');
-}
-
-function closeReviewModal() {
-    document.getElementById('reviewModal').classList.remove('active');
-}
-
-function setRating(rating) {
-    selectedRatingScore = rating;
-    const stars = document.querySelectorAll('#starPicker span');
-    stars.forEach((s, idx) => {
-        if (idx < rating) {
-            s.classList.add('active');
-        } else {
-            s.classList.remove('active');
-        }
-    });
-}
-
-async function handleReviewSubmit(e) {
-    e.preventDefault();
-    const name = document.getElementById('revName').value;
-    const comment = document.getElementById('revComment').value;
-
-    const payload = {
-        name,
-        rating: selectedRatingScore,
-        comment,
-        date: new Date().toLocaleDateString('id-ID', { year: 'numeric', month: 'long', day: 'numeric' })
-    };
+    const today = new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' });
 
     try {
-        await fetch('/api/reviews', {
+        const res = await fetch('/api/reviews', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
+            body: JSON.stringify({ name, rating, comment, date: today })
         });
-        await fetchReviewsFromDB();
-        closeReviewModal();
-        alert('Terima kasih! Ulasan Anda telah tersimpan di database.');
+        if (res.ok) {
+            alert("Ulasan Anda berhasil disimpan ke database!");
+            await loadReviews();
+        } else {
+            alert("Gagal mengirim ulasan.");
+        }
     } catch (err) {
-        alert('Gagal mengirim ulasan!');
+        alert("Error: " + err.message);
+    }
+}
+
+// --- Event Listeners Setup ---
+function setupEventListeners() {
+    const searchInput = document.querySelector('input[type="text"]');
+    if (searchInput) {
+        searchInput.addEventListener('input', (e) => {
+            const query = e.target.value.toLowerCase();
+            const filtered = products.filter(p => 
+                p.title.toLowerCase().includes(query) || 
+                p.category.toLowerCase().includes(query) ||
+                p.desc.toLowerCase().includes(query)
+            );
+            renderProducts(filtered);
+        });
+    }
+
+    const addReviewBtn = document.getElementById('add-review-btn') || document.querySelector('button:has-text("Ulasan")');
+    if (addReviewBtn) {
+        addReviewBtn.onclick = submitReview;
     }
 }
