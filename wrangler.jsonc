@@ -1,0 +1,8 @@
+{
+  "name": "diastraa-studio",
+  "compatibility_date": "2026-10-19",
+  "assets": { "directory": "./public" },
+  "d1_databases": [
+    { "binding": "DB", "database_name": "webcraft-db", "database_id": "669cf804-3546-4685-94f9-59219bc9f856" }
+  ]
+}
